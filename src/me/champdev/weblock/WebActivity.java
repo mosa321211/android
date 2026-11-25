@@ -817,7 +817,8 @@ public class WebActivity extends Activity {
     void autosearch(WebView v, String q, boolean pickOnly) {
         java.util.regex.Matcher y = java.util.regex.Pattern.compile("\\d{4}").matcher(String.valueOf(getIntent().getStringExtra("year")));
         try {
-            v.evaluateJavascript(Sites.readAll(getAssets().open("autosearch.js")) + "(" + JSONObject.quote(q) + "," + JSONObject.quote(y.find() ? y.group() : "") + "," + pickOnly + ")", null);
+            String other = getIntent().getStringExtra("qOther");
+            v.evaluateJavascript(Sites.readAll(getAssets().open("autosearch.js")) + "(" + JSONObject.quote(q) + "," + JSONObject.quote(y.find() ? y.group() : "") + "," + pickOnly + "," + JSONObject.quote(other == null ? "" : other) + ")", null);
         } catch (IOException ignored) { }
     }
 

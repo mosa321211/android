@@ -40,6 +40,7 @@ final class Catalog {
 
     static final class Title {
         String tmdb = "";   // TheMovieDB id (Cinemeta meta only): many sites key their pages by it
+        String nameAr = "", nameEn = ""; // localized names carried together through site search
         String id = "", type = "movie", name = "", year = "", rating = "", poster = "", background = "", overview = "", runtime = "", genres = "";
         String cast = "", director = "", writer = "", country = "", awards = "", status = "";   // from the detail page
         String trailer = "";   // YouTube id (detail page)
@@ -273,11 +274,83 @@ final class Catalog {
                 Title t = parse(o, type);
                 t.tmdb = o.optString("id").replaceFirst("^tmdb:", "");
                 t.id = imdb;
+                String original = o.optString("originalName", o.optString("original_name"));
+                if (looksArabic(t.name)) t.nameAr = t.name;
+                else t.nameEn = t.name;
+                if (!original.isEmpty()) {
+                    if (looksArabic(original)) t.nameAr = original; else t.nameEn = original;
+                }
                 t.poster = t.poster.replace("/t/p/w342/", "/t/p/w500/");   // sharp on a TV card
                 out.add(t);
             }
         } catch (JSONException ignored) { }
         return out;
+    }
+
+    static boolean looksArabic(String s) { return s != null && s.matches("(?s).*\\p{InArabic}.*"); }
+
+    /** Arabic title search uses TMDB's localized catalog; English-only catalogs receive the English/original title. */
+    static List<Title> unifiedSearch(String query) {
+        if (!looksArabic(query)) {
+            String extra = "search=" + android.net.Uri.encode(query);
+            List<Title> out = new ArrayList<>();
+            java.util.concurrent.CompletableFuture<List<Title>> movieCall = java.util.concurrent.CompletableFuture.supplyAsync(() -> list("movie", extra));
+            java.util.concurrent.CompletableFuture<List<Title>> seriesCall = java.util.concurrent.CompletableFuture.supplyAsync(() -> list("series", extra));
+            List<Title> movies = movieCall.join(), series = seriesCall.join();
+            if (movies != null) out.addAll(movies.subList(0, Math.min(20, movies.size())));
+            if (series != null) out.addAll(series.subList(0, Math.min(20, series.size())));
+            out.parallelStream().forEach(t -> { t.nameEn = t.name; if (!t.tmdb.isEmpty()) localizedName(t, "ar"); });
+            return out;
+        }
+        List<Title> out = new ArrayList<>();
+        String encoded = android.net.Uri.encode(query);
+        java.util.concurrent.CompletableFuture<String> movieCall = java.util.concurrent.CompletableFuture.supplyAsync(() -> get(TMDB + "/catalog/movie/tmdb.search/search=" + encoded + ".json?language=ar", false));
+        java.util.concurrent.CompletableFuture<String> seriesCall = java.util.concurrent.CompletableFuture.supplyAsync(() -> get(TMDB + "/catalog/series/tmdb.search/search=" + encoded + ".json?language=ar", false));
+        for (String type : new String[]{"movie", "series"}) {
+            String json = (type.equals("movie") ? movieCall : seriesCall).join();
+            if (json == null) continue;
+            List<Title> hits = parseTmdb(json, type);
+            hits.parallelStream().forEach(t -> {
+                if (t.nameAr.isEmpty() && looksArabic(t.name)) t.nameAr = t.name;
+                localizedName(t, "en");
+                if (t.nameEn.isEmpty()) t.nameEn = t.name;
+                t.name = t.nameAr.isEmpty() ? t.name : t.nameAr;
+            });
+            out.addAll(hits);
+        }
+        return out;
+    }
+
+    /** Adds a translated title from TMDB's title-by-id metadata without changing the display name. */
+    static void localizedName(Title t, String language) {
+        if (t.tmdb.isEmpty()) return;
+        String path = TMDB + "/meta/" + t.type + "/tmdb:" + t.tmdb + ".json?language=" + language;
+        String json = get(path, false);
+        if (json == null) return;
+        try {
+            JSONObject meta = new JSONObject(json).optJSONObject("meta");
+            if (meta == null) return;
+            String name = meta.optString("name");
+            if (name.isEmpty()) return;
+            if (language.startsWith("ar")) t.nameAr = name; else t.nameEn = name;
+        } catch (JSONException ignored) { }
+    }
+
+    /** Normalization used to compare Arabic queries and localized metadata consistently. */
+    static String normalizeArabic(String s) {
+        if (s == null) return "";
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\u0640' || Character.getType(c) == Character.NON_SPACING_MARK || Character.getType(c) == Character.COMBINING_SPACING_MARK || Character.getType(c) == Character.ENCLOSING_MARK) continue;
+            if (c == '\u0623' || c == '\u0625' || c == '\u0622') c = '\u0627';
+            else if (c == '\u0629') c = '\u0647';
+            else if (c == '\u0649') c = '\u064a';
+            else if (c >= '\u0660' && c <= '\u0669') c = (char)('0' + c - '\u0660');
+            else if (c >= '\u06f0' && c <= '\u06f9') c = (char)('0' + c - '\u06f0');
+            b.append(c);
+        }
+        return java.text.Normalizer.normalize(b, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "").toLowerCase(java.util.Locale.ROOT);
     }
 
     /** A wide picture for a title: its own, else Cinemeta's by IMDb id ("" when there is no id to ask by). */
@@ -627,6 +700,9 @@ final class Catalog {
                 t.name = o.optString("name");
                 t.year = o.optString("year");
                 t.poster = o.optString("poster");
+                t.tmdb = o.optString("tmdb");
+                t.nameAr = o.optString("nameAr");
+                t.nameEn = o.optString("nameEn");
                 out.add(t);
             }
         } catch (JSONException ignored) { }
@@ -643,7 +719,8 @@ final class Catalog {
         try {
             JSONArray old = new JSONArray(App.prefs.getString("mylist", "[]")), now = new JSONArray();
             boolean had = false;
-            now.put(new JSONObject().put("id", t.id).put("type", t.type).put("name", t.name).put("year", t.year).put("poster", t.poster));
+            now.put(new JSONObject().put("id", t.id).put("type", t.type).put("name", t.name).put("year", t.year).put("poster", t.poster)
+                .put("tmdb", t.tmdb).put("nameAr", t.nameAr).put("nameEn", t.nameEn));
             for (int i = 0; i < old.length(); i++) {
                 if (old.getJSONObject(i).getString("id").equals(t.id)) had = true;
                 else now.put(old.get(i));

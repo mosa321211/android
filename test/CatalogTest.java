@@ -29,6 +29,15 @@ public class CatalogTest {
         check("episode fields", !s.episodes.isEmpty() && s.episodes.get(0).number >= 1 && !s.episodes.get(0).title.isEmpty());
         check("overview present", !s.overview.isEmpty());
         check("garbage gives empty list", Catalog.parseList("<html>nope</html>", "movie").isEmpty());
+        check("Arabic hamza and alef normalize equally", Catalog.normalizeArabic("الكبير أوي").equals(Catalog.normalizeArabic("الكبير اوي")));
+        check("Arabic diacritics and tatweel are removed", Catalog.normalizeArabic("فِــيلْمٌ").equals("فيلم"));
+        check("Arabic taa marbuta and haa normalize equally", Catalog.normalizeArabic("مدرسة").equals(Catalog.normalizeArabic("مدرسه")));
+        check("Arabic alef maqsura and ya normalize equally", Catalog.normalizeArabic("على").equals(Catalog.normalizeArabic("علي")));
+        check("Arabic-Indic digits become ASCII", Catalog.normalizeArabic("٢٠٢٤ ۱۲۳").equals("2024 123"));
+        for (String arabicQuery : new String[]{"الكبير أوي", "الكبير اوي", "فيلم", "كابرنعوم"})
+            check("Arabic query detected: " + arabicQuery, Catalog.looksArabic(arabicQuery));
+        check("English query stays English", !Catalog.looksArabic("El Kebeer Awi"));
+        check("Arabic site language labels are recognized", Sites.isArabicLanguage("Arabic") && Sites.isArabicLanguage("ar") && !Sites.isArabicLanguage("English"));
 
         List<Catalog.Title> local = Catalog.parseTmdb(new String(Files.readAllBytes(Paths.get("test/fixtures/tmdb-language.json")), java.nio.charset.StandardCharsets.UTF_8), "movie");
         check("TMDB titles without an IMDb link are dropped", local.size() == 2);

@@ -27,6 +27,10 @@ public class TitleActivity extends Home {
         t.id = getIntent().getStringExtra("id");
         t.type = getIntent().getStringExtra("type");
         t.name = getIntent().getStringExtra("name");
+        t.nameAr = getIntent().getStringExtra("nameAr");
+        t.nameEn = getIntent().getStringExtra("nameEn");
+        if (t.nameAr == null) t.nameAr = "";
+        if (t.nameEn == null) t.nameEn = "";
         t.year = String.valueOf(getIntent().getStringExtra("year"));
         t.poster = String.valueOf(getIntent().getStringExtra("poster"));
         t.anime = getIntent().getBooleanExtra("anime", false);
@@ -361,7 +365,10 @@ public class TitleActivity extends Home {
     android.content.Intent titleIntent(Sites.Site s) {
         String link = Sites.deeplink(s.url, t);
         android.content.Intent in = WebActivity.open(this, s.name, s.url, link != null ? link : s.url);
-        return link != null ? in.putExtra("play", !t.series()) : in.putExtra("q", t.name).putExtra("year", t.year);
+        String english = t.nameEn.isEmpty() ? t.name : t.nameEn;
+        String arabic = t.nameAr.isEmpty() ? t.name : t.nameAr;
+        return link != null ? in.putExtra("play", !t.series()) : in.putExtra("q", s.arabic ? arabic : english)
+            .putExtra("qOther", s.arabic ? english : arabic).putExtra("nameAr", arabic).putExtra("nameEn", english).putExtra("year", t.year);
     }
 
     void watch(Catalog.Episode e) {

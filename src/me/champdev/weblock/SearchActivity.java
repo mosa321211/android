@@ -287,35 +287,31 @@ public class SearchActivity extends Home {
     void searchTitles() {
         final String q = query.trim();
         if (q.length() < 2 || q.equals(titlesFor)) return;
-        String extra = "search=" + android.net.Uri.encode(q);
-        // Movies, series and Kitsu's anime list (only for the Anime label) at the same time
-        {
-            CompletableFuture<java.util.Set<String>> anime = CompletableFuture.supplyAsync(() -> Catalog.animeIds(q), lane);
-            CompletableFuture.supplyAsync(() -> Catalog.list("movie", extra), lane)
-                .thenCombine(CompletableFuture.supplyAsync(() -> Catalog.list("series", extra), lane), (movies, series) -> {
-                    List<Catalog.Title> all = new ArrayList<>();
-                    if (movies != null) all.addAll(movies.subList(0, Math.min(20, movies.size())));   // 20 a kind at most
-                    if (series != null) all.addAll(series.subList(0, Math.min(20, series.size())));
-                    java.util.Set<String> ids = anime.join();
-                    for (Catalog.Title t : all) t.anime = ids.contains(t.id);
-                    // Cinemeta also returns loose matches (a series named "...Ankara..." for "kantara"): titles with every typed word come first,
-                    // then newest to oldest in each group
-                    String[] words = q.toLowerCase(Locale.ROOT).split("\\s+");
-                    all.sort(java.util.Comparator.<Catalog.Title, Boolean>comparing(t -> !matches(t.name, words))
-                        .thenComparing(t -> -Catalog.startYear(t.year)));
-                    boolean failed = movies == null && series == null;
-                    runOnUiThread(() -> {
-                        if (!q.equals(query.trim())) return;
-                        titles = all;
-                        titlesFor = q;
-                        titlesFailed = failed;
-                        showResults();
-                        // Enter on a TV: the results come after it, so the remote goes to the first one now (unless it already moved there)
-                        if (focusResults && firstCard != null) { focusResults = false; if (!inside(getCurrentFocus(), results)) firstCard.requestFocus(); }
-                    });
-                    return null;
+        boolean arabicQuery = Catalog.looksArabic(q);
+        // TMDB provides Arabic names; Kitsu gets the matching English title when the user typed Arabic.
+        CompletableFuture<java.util.Set<String>> englishAnime = arabicQuery ? null : CompletableFuture.supplyAsync(() -> Catalog.animeIds(q), lane);
+        CompletableFuture.supplyAsync(() -> Catalog.unifiedSearch(q), lane).thenCompose(all -> {
+            // Keep the existing single Kitsu request for English searches; for Arabic use the best TMDB English title.
+            String kitsuQuery = arabicQuery && !all.isEmpty() ? (all.get(0).nameEn.isEmpty() ? all.get(0).name : all.get(0).nameEn) : q;
+            CompletableFuture<java.util.Set<String>> anime = arabicQuery ? CompletableFuture.supplyAsync(() -> Catalog.animeIds(kitsuQuery), lane) : englishAnime;
+            return anime.thenAccept(ids -> {
+                for (Catalog.Title t : all) t.anime = ids.contains(t.id);
+                // Exact normalized name matches come first, then newest to oldest in each group.
+                String[] words = (arabicQuery ? Catalog.normalizeArabic(q) : q.toLowerCase(Locale.ROOT)).split("\\s+");
+                all.sort(java.util.Comparator.<Catalog.Title, Boolean>comparing(t -> !(matches(t.name, words) || matches(t.nameAr, words) || matches(t.nameEn, words)))
+                    .thenComparing(t -> -Catalog.startYear(t.year)));
+                boolean failed = all.isEmpty();
+                runOnUiThread(() -> {
+                    if (!q.equals(query.trim())) return;
+                    titles = all;
+                    titlesFor = q;
+                    titlesFailed = failed;
+                    showResults();
+                    // Enter on a TV: the results come after it, so the remote goes to the first one now (unless it already moved there)
+                    if (focusResults && firstCard != null) { focusResults = false; if (!inside(getCurrentFocus(), results)) firstCard.requestFocus(); }
                 });
-        };
+            });
+        });
     }
 
     /** A spinner and a line while the catalog answers. */
@@ -338,7 +334,7 @@ public class SearchActivity extends Home {
     }
 
     static String plain(String s) {
-        return java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD).replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT);
+        return Catalog.normalizeArabic(s);
     }
 
     /** Name starts with it, then name contains it, then the lists' picks, then the rest. */

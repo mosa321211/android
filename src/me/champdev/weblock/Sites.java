@@ -24,7 +24,7 @@ final class Sites {
         String name, url, tags = "", group = "";   // group = the section of its list it came from
         List<String> tagList = new ArrayList<>();
         final List<String> mirrors = new ArrayList<>();
-        boolean pick, index;
+        boolean pick, index, arabic;
     }
 
     private static org.json.JSONObject deeplinks;
@@ -148,27 +148,49 @@ final class Sites {
         try {
             JSONObject o = new JSONObject(json);
             JSONObject r = o.optJSONObject("rows");
-            for (int i = 0; r != null && i < Cats.ORDER.length; i++) merge(r.optJSONArray(Cats.KEYS[i]), rows.get(Cats.ORDER[i]));
+            for (int i = 0; r != null && i < Cats.ORDER.length; i++) merge(r.optJSONArray(Cats.KEYS[i]), rows.get(Cats.ORDER[i]), false);
             JSONObject l = o.optJSONObject("languages");
             for (java.util.Iterator<String> it = l == null ? null : l.keys(); it != null && it.hasNext(); ) {
                 String lang = it.next();
                 if (!langs.containsKey(lang)) langs.put(lang, new ArrayList<>());
-                merge(l.optJSONArray(lang), langs.get(lang));
+                boolean arabic = isArabicLanguage(lang);
+                merge(l.optJSONArray(lang), langs.get(lang), arabic);
+                if (arabic) markArabicDuplicates(l.optJSONArray(lang), rows.values());
             }
         } catch (JSONException ignored) { }
     }
 
     static void merge(JSONArray a, List<Site> into) {
+        merge(a, into, false);
+    }
+
+    static boolean isArabicLanguage(String lang) {
+        return lang != null && (lang.equalsIgnoreCase("ar") || lang.toLowerCase(java.util.Locale.ROOT).startsWith("ar-")
+            || lang.toLowerCase(java.util.Locale.ROOT).startsWith("ar_") || lang.toLowerCase(java.util.Locale.ROOT).contains("arabic") || lang.contains("العربية"));
+    }
+
+    static void markArabicDuplicates(JSONArray sites, java.util.Collection<List<Site>> rows) {
+        for (int i = 0; sites != null && i < sites.length(); i++) {
+            String url = sites.optJSONObject(i) == null ? "" : sites.optJSONObject(i).optString("url").trim();
+            if (url.isEmpty()) continue;
+            for (List<Site> row : rows) for (Site site : row) if (site.url.equals(url)) site.arabic = true;
+        }
+    }
+
+    static void merge(JSONArray a, List<Site> into, boolean languageArabic) {
         for (int i = 0; a != null && i < a.length(); i++) {
             JSONObject o = a.optJSONObject(i);
             if (o == null) continue;
             Site s = new Site();
             s.name = o.optString("name").trim();
             s.url = o.optString("url").trim();
-            if (s.name.isEmpty() || !s.url.matches("(?i)https?://.+") || has(into, s.url)) continue;
+            if (s.name.isEmpty() || !s.url.matches("(?i)https?://.+")) continue;
+            s.arabic = languageArabic || isArabicLanguage(o.optString("language")) || isArabicLanguage(o.optString("languages")) || isArabicLanguage(o.optString("group"));
+            if (has(into, s.url)) { for (Site prior : into) if (prior.url.equals(s.url)) prior.arabic |= s.arabic; continue; }
             JSONArray m = o.optJSONArray("mirrors"), t = o.optJSONArray("tags");
             for (int j = 0; m != null && j < m.length(); j++) if (m.optString(j).matches("(?i)https?://.+")) s.mirrors.add(m.optString(j));
             for (int j = 0; t != null && j < t.length(); j++) if (!t.optString(j).isEmpty()) s.tagList.add(t.optString(j));
+            for (String tag : s.tagList) s.arabic |= isArabicLanguage(tag);
             s.tags = String.join(" · ", s.tagList);
             s.group = o.optString("group");
             s.pick = o.optBoolean("pick");

@@ -686,7 +686,7 @@ public class Home extends Activity {
 
     void openTitle(Catalog.Title t) {
         startActivity(new Intent(this, TitleActivity.class).putExtra("id", t.id).putExtra("type", t.type).putExtra("name", t.name).putExtra("year", t.year)
-            .putExtra("poster", t.poster).putExtra("anime", t.anime).putExtra("tmdb", t.tmdb));
+            .putExtra("poster", t.poster).putExtra("anime", t.anime).putExtra("tmdb", t.tmdb).putExtra("nameAr", t.nameAr).putExtra("nameEn", t.nameEn));
     }
 
     /** One row of site cards. Picks come first; a long category shows its first batch and an "All" card for the rest. */
